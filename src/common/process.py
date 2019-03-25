@@ -45,7 +45,7 @@ class Designer(object):
 class Freesurfer(object):
 
     @staticmethod
-    def run(input_path, output_path, subject_name, subjects_dir='/home/shihong/Desktop/Qi_Chen/data/PROCESSED/FREESURFER_PONS/'):
+    def run(input_path, output_path, subject_name, subjects_dir=None):
         os.environ['SUBJECTS_DIR'] = subjects_dir
         command = 'recon-all -all -i \"{}\" -s \"{}\"  -brainstem-structures -parallel -openmp 6'.format(input_path, subject_name)
         Command.excute(command)
