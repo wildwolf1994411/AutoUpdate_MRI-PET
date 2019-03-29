@@ -38,7 +38,7 @@ class Update(object):
             
     @staticmethod
     def update_sum_pet(subjects, pet_path, window, choice):
-        file_lst = Command.find_files(pet_path, ['*{}*_{}.csv'.format(window, choice)])
+        file_lst = Command.find_files(pet_path, ['*{}*_{}.csv'.format(window, choice)], ['brainstem'])
         file_dic = {}
         df_window = []
         col = []
@@ -50,5 +50,7 @@ class Update(object):
         for subject in col:
             df_window.append(file_dic[subject])
         df_window = pd.concat(df_window, axis=1, sort=False)
+        df_window.columns = col
         df_window.to_csv('{}/{}_{}.csv'.format(pet_path, window, choice), sep='\t')
         print 'pet {} updated'.format(choice)
+        return df_window

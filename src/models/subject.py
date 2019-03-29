@@ -10,6 +10,9 @@ from src.common.process import Register_aseg
 
 class Subject(object):
     def __init__(self, subject, path, freesurfer_path, kaiba_path, designer_path, pet_path, pet_norm_region):
+        """
+        We expected each processed subject have same file structrue 
+        """
         self.subject = subject
         self.path = path
         self.freesurfer_path = freesurfer_path
@@ -28,8 +31,7 @@ class Subject(object):
         self._update_designer()
         self._update_designer_table()
 
-
-    def _update_freesurfer(self):
+    def _update_freesurfer(self, update_pons=True):
         # update FreeSurfer
         freesurfer_require = ['*HEAD_SAG_3D*']
         if not os.path.exists('{}/{}'.format(self.freesurfer_path, self.subject)):
@@ -47,7 +49,13 @@ class Subject(object):
             else:
                 print 'required file not exist, please check require files {}'.format(freesurfer_require)
         else:
-            print 'freesurfer already exist....check next'
+            print 'freesurfer already exist....will check status of brainstem'
+            if update_pons:
+                print 'now update......'
+                Freesurfer.update_pons(self.freesurfer_path, self.subject)
+                print 'finished \n'
+            else:
+                print 'check next subject\n'
         return
 
     def _update_kaiba(self):
@@ -111,16 +119,27 @@ class Subject(object):
                                   register)
             else:
                 print 'cannot find require file' 
-    
+
+    def _update_designer_label(self):
+        designer_parameters_path = '{}/{}/designer_parameters/'.format(self.designer_path, self.subject)
+        designer_label_path = '{}/{}/WMroi/'.format(self.designer_path, self.subject)
+        if not os.path.exists(designer_parameters_path):
+            print 'designer not exist for subject {}, please update DESIGNER first'.format(self.subject)
+        
+        Designer.wm_extraction_fa(designer_parameters_path, designer_label_path)
+
     def _update_pet_suv(self, register=False):
         correction_require = ['*MIN*ATLAS*', '*MIN*HIRES*', '*ATLAS*MIN*', '*HIRES*MIN*']
         correction_expection = ['NAC']
         aseg_require = ['aparc+aseg.mgz']
         norm_require = ['norm.mgz']
+
         fs_subject_path = '{}/{}'.format(self.freesurfer_path, self.subject)
+        
         pet_lst = Command.find_files(self.path, correction_require, correction_expection)
         aseg_lst = Command.find_files(fs_subject_path, aseg_require) # only have one for each subject
         norm_lst = Command.find_files(fs_subject_path, norm_require) # only have one for each subject
+        
         if pet_lst and aseg_lst and norm_lst:
             print 'required file found now processing'
             for pet in pet_lst:
@@ -136,17 +155,26 @@ class Subject(object):
                                         register)
                         print 'save file to {}'.format(output_path)
                         pet_nii = '{}/{}_transform.nii'.format(output_path, os.path.basename(pet))
-                        self._pet_normalize_FSlabel(output_path, pet_nii, region=self.pet_norm_region)
+                        if self.pet_norm_region == ['Pons']:
+                            pass
+                        else:
+                            self._pet_normalize_aseg_label(output_path, pet_nii)
+
+            if self.pet_norm_region == ['Pons']:
+                self._pet_normalize_brainstem_pons(output_path, pet_nii)
+            else:
+                pass
+                                
         else:
             print 'cannot find require file' 
-    
-    def _pet_normalize_FSlabel(self, input_path, pet_nii, region=['Left-Cerebellum-Cortex', 'Right-Cerebellum-Cortex']):
+
+    def _pet_normalize_aseg_label(self, input_path, pet_nii):
         mean_file = Command.find_files(input_path, ['*_mean.csv'])[0]
         std_file = Command.find_files(input_path, ['*_std.csv'])[0]
         df_mean = pd.read_csv(mean_file, sep='\t', index_col=0)
         df_std = pd.read_csv(std_file, sep='\t', index_col=0)   
             
-        mean_value = np.mean([df_mean['0'][r]*1.0 for r in region])
+        mean_value = np.mean([df_mean['0'][r]*1.0 for r in self.pet_norm_region])
         df_mean_norm = df_mean/mean_value
         df_std_norm = df_std/mean_value
 
@@ -159,3 +187,64 @@ class Subject(object):
         command = 'mrcalc -force \"{}\" {} -divide \"{}\"'.format(pet_nii, mean_value, pet_nii_norm)
         Command.excute(command)
         print 'finished normailize'
+    
+    def _pet_normalize_brainstem_pons(self, input_path, pet_nii, register=False):
+        correction_require = ['*MIN*ATLAS*', '*MIN*HIRES*', '*ATLAS*MIN*', '*HIRES*MIN*']
+        correction_expection = ['NAC']
+        brainstem_require = ['brainstemSsLabels.v10.mgz']
+        norm_require = ['norm.mgz']
+        
+        fs_subject_path = '{}/{}'.format(self.freesurfer_path, self.subject)
+
+        pet_lst = Command.find_files(self.path, correction_require, correction_expection)
+        brainstem_lst = Command.find_files(fs_subject_path, brainstem_require) # only have one for each subject
+        norm_lst = Command.find_files(fs_subject_path, norm_require) # only have one for each subject
+
+        if pet_lst and brainstem_lst and norm_lst:
+            print 'required file found now processing'
+            for pet in pet_lst:
+                for brainstem in brainstem_lst:
+                    for norm in norm_lst:
+                        output_path = '{}/{}/{}/'.format(self.pet_path, self.subject, os.path.basename(pet))
+                        if not os.path.exists(output_path):
+                            os.makedirs(output_path)
+
+                        Register_aseg.register_brainstem(pet, output_path, 
+                                                         self.subject, self.freesurfer_path, 
+                                                         brainstem, norm, 
+                                                         register)
+                        print 'save file to {}'.format(output_path)
+                        pet_nii = '{}/{}_transform.nii'.format(output_path, os.path.basename(pet))
+
+                        mean_file = Command.find_files(output_path, ['*_mean.csv'], expection=['brainstem'])[0]
+                        std_file = Command.find_files(output_path, ['*_std.csv'], expection=['brainstem'])[0]
+                        pons_mean_file = Command.find_files(output_path, ['*brainstem_mean.csv'])[0]
+                        pons_std_file = Command.find_files(output_path, ['*brainstem_std.csv'])[0]
+                        
+                        df_mean = pd.read_csv(mean_file, sep='\t', index_col=0)
+                        df_std = pd.read_csv(std_file, sep='\t', index_col=0)   
+                        
+                        df_pons_mean = pd.read_csv(pons_mean_file, sep='\t', index_col=0)
+                        df_pons_std = pd.read_csv(pons_std_file, sep='\t', index_col=0)
+
+                        df_mean = df_mean.append(df_pons_mean)
+                        df_std = df_std.append(df_pons_std)
+
+                        pons_value = float(df_mean['0']['Pons'])
+                        df_mean_norm = df_mean/pons_value
+                        df_std_norm = df_std/pons_value
+
+                        mean_norm_file = mean_file.rstrip('.csv')+ '_norm.csv'
+                        std_norm_file = std_file.rstrip('.csv')+ '_norm.csv'
+
+                        df_mean.to_csv(mean_file, sep='\t')
+                        df_std.to_csv(std_file, sep='\t')
+                        print mean_norm_file
+                        print std_norm_file
+                        df_mean_norm.to_csv(mean_norm_file, sep='\t')
+                        df_std_norm.to_csv(std_norm_file, sep='\t')
+                        
+                        pet_nii_norm = pet_nii.rstrip('.nii')+'_norm.nii'
+                        command = 'mrcalc -force \"{}\" {} -divide \"{}\"'.format(pet_nii, pons_value, pet_nii_norm)
+                        Command.excute(command)
+                        print 'finished normailize'
